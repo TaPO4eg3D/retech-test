@@ -16,11 +16,22 @@ class LoginView(ObtainAuthToken):
         try:
             user = User.objects.get(email=request.data['email'])
         except:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response('User with such email not found', status=status.HTTP_404_NOT_FOUND)
 
         serializer = UserLoginSerializer(user, data=request.data,
                                          context={'request': request})
         serializer.is_valid(raise_exception=True)
+
+        if 'active_organization' not in serializer.validated_data:
+            organizations = user.organizations.all()
+            print(organizations)
+            return Response({
+                'active_organization': {
+                    'message': 'This field is required',
+                    'available_organizations': OrganizationSerializer(organizations, many=True).data
+                }
+            })
+
         try:
             organization = user.organizations.get(pk=request.data['active_organization'])
         except:
@@ -46,8 +57,12 @@ class RegisterView(generics.CreateAPIView):
             return Response('Input correct organizations ids')
         user = serializer.save()
         token, created = Token.objects.get_or_create(user=user)
-        organizations = OrganizationSerializer(user.organizations.all(), many=True)
-        active_organization = OrganizationSerializer(user.organizations.all()[0])
+        organizations_query = user.organizations.all()
+        organizations = OrganizationSerializer(organizations_query, many=True)
+        active_organization = OrganizationSerializer(organizations_query[0])
+        # First organization in input becomes active
+        user.active_organization = organizations_query[0]
+        user.save()
         return Response({
             'token': token.key,
             'email': user.email,
@@ -56,15 +71,20 @@ class RegisterView(generics.CreateAPIView):
         })
 
 
-class ListToDos(APIView):
+class ListOrganizationsView(generics.ListAPIView):
+    serializer_class = OrganizationSerializer
+    queryset = Organisation.objects.all()
+
+
+class ListToDosView(APIView):
 
     permission_classes = (IsAuthenticated, )
 
     def get(self, request, *args, **kwargs):
 
-        list = ToDoList.objects.get(organization=request.user.active_organization)
-        todos = ToDo.objects.filter(list=list)
-
-        serializer = ToDoSerializer(todos, many=True)
+        print(request.user)
+        todo_lists = ToDoList.objects.filter(organization=request.user.active_organization)
+        print(todo_lists)
+        serializer = ToDoListSerializer(todo_lists, many=True)
 
         return Response(serializer.data, status.HTTP_200_OK)
